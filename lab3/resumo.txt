@@ -1,0 +1,127 @@
+Cap5
+- Fazer o codigo modular, ou seja,, fazer varias funções
+- Todos os codigos fonte (.c) devem incluir a linha: #include <lcom/lcf.h>. Deve ser a primeira header a ser incluida
+
+5.1. kbd_test_scan()
+- Proposito: testar se o nosso codigo consegue ler scancodes do KBC usando o IH 
+- a definição da função deve aparecer entre parênteses
+- O primeiro byte de scancodes de 2bytes é usualmente 0xE0 
+- primeiro, deve subscrever ao KBC com a policy IRQ_REENABLE | IRQ_EXCLUSIVE e desativar a IH do minix3 para nao ler o OUT_BUF antes de nós
+- a função do IH (void kdb_ih()) nao tem parametros nem retorna nada. A passagem de dados é feita através de variaveis globais
+	- Deve ler o status do status register, para verificar se ocorreu algum erro, e ler o scancode byte do output buffer
+	- esta função tambem deve aparecer entre parenteses;
+	- quando deteta uma interrupção, lê o scancode do OUT_BUF
+	- deve ler apenas um byte por interrupção.	
+	- deve verificar se ocorreu erro
+	- nao deve fazer print dos scancodes
+- deve fazer print do scancode com a função: int kbd_print_scancode(bool make, uint8_t size, uint8_t bytes[]), em que make indica se é um
+make ou break code, o size o tamanho do scancode em bytes, e bytes[] o array com os bytes do scancode, em que o primeiro byte aparece primeiro
+- deve terminar quando lê o breakcode da ESC key (0x81). Ao terminar, deve cancelar a subscrição feita ao kbc e fazer print
+do numero de sys_inb feitos pela função int kbd_print_no_sysinb(uint32_t cnt), onde cnt é o numero de sys_inb feitos
+- nao se quer esta funcionalidade (print dos sys_inb) no projeto, logo deve-se fazer:
+
+#define LAB3
+sys_inb(...);
+#ifdef LAB3
+cnt++;
+#endif
+
+- tem que se adicionar a linha ao MakeFile: CPPFLAGS += -D LAB3
+
+Os comandos KBC:
+- No porto 0x64 existem 2 registos: o status Register para ler o estado do KBC e um nao nomeado para escrever os comandos KBC
+- o valor de input A2 é usado pelo KBC para distinguir comandos KBC dos KBD, ou seja, o KBC só tem um registo de escrita, o IN_BUF
+Status Register:
+- Tanto o input quanto o output do KBC requerem ler o Status Register
+
+Bit Name Meaning (if set)
+7 | Parity | Parity error - invalid data
+6 | Timeout | Timeout error - invalid data
+5 | Aux | Mouse data
+4 | INH | Inhibit flag: 0 if keyboard is inhibited
+3 | A2 | A2 input line: 0 data byte
+						1  command  byte
+2 | SYS | System flag: 0 if system in power-on reset,
+					   1  if system already initialized
+1 | IBF | Input buffer full
+		  don’t write commands or arguments
+0 | OBF | Output buffer full - data available for reading
+
+- deve se verificar no IH os bits de erro 7 e 6
+- nao escrever no IN_BUF se o IBF está a 1
+
+Keyboard-Related KBC Commands for PC-AT/PS2
+- devem ser escritos usando o endereço 0x64
+	- se existirem argumentos devem ser passados usando o endereço 0x60
+	- se existirem valores de returno sao passados pelo OUT_BUF
+
+Command Meaning Args (A)/ Return (R)
+0x20 | Read Command Byte | Returns Command Byte
+0x60 | Write Command Byte | Takes A: Command Byte
+0xAA | Check KBC (Self-test) | Returns 0x55, if OK
+							 Returns 0xFC, if error
+0xAB | Check Keyboard Interface | Returns 0, if OK
+0xAD | Disable KBD Interface
+0xAE | Enable KBD Interface
+
+-KBD interface é uma serial interface entre o teclado e o KBD
+
+(KBC “Command Byte”)
+
+7 6  5    4  3 2  1    0
+– – DIS2 DIS – – INT2 INT
+
+DIS2 1: desativa o rato
+DIS 1: desativa a interface do teclado
+INT2 1: ativa interrupção quando OBF, do rato
+INT 1: ativa interrupção quando OBF, do teclado
+- : Ou nao se usa ou nao importante para este lab
+
+- Para ler, usa-se o comando KBC 0x20, que deve ser escrito em 0x64, mas o valor do "byte de comando" deve ser lido do 0x60
+- Para escrever, usa-se o comando KBC 0x20, que deve ser escrito em 0x64, mas o novo valor do "byte de comando" deve ser escrito do 0x60
+
+Issuing a Command to the KBC
+
+#define STAT_REG 0x64
+#define KBC_CMD_REG 0x64
+
+while( 1 ) {
+	sys_inb(STAT_REG, &stat); 	/* assuming it returns OK */
+	/* loop while 8042 input buffer is not empty */
+	if( (stat & IBF) == 0 ) {
+		sys_outb(KBC_CMD_REG, cmd); /* no args command */
+		return 0;
+	}
+	delay(WAIT_KBC);
+}
+
+- nao pode fazer ouput para 0x64 enquanto o input buffer estiver cheio
+- so sai do loop quando faz, com sucesso, ouput dos dados para o 0x64
+	- para o codigo ser resiliente a falhas no KBC/KBA, deve desistir depois de algum tempo
+
+Reading Return Value/Data from the KBC
+
+#define OUT_BUF 0x60
+
+while( 1 ) {
+	sys_inb(STAT_REG, &stat); /* assuming it returns OK */
+	/* loop while 8042 output buffer is empty */
+	if( stat & OBF ) {
+		sys_inb(OUT_BUF, &data); /* assuming it returns OK */
+		if ( (stat &(PAR_ERR | TO_ERR)) == 0 )
+			return data;
+		else
+			return -1;
+	}
+	delay(WAIT_KBC);
+}
+
+- nao é robusto contra falhas no KBC/KBA
+- tem que se fazer uma mascara para o IRQ1, caso contrario o IH do teclado pode correr 	antes de conseguirmos ler o OUT_BUF
+
+KBC Programming Issues
+- o codigo precisa de esperar tempo suficiente pelo resposta do KBC/KBA, mas nao indefinitivamente
+- o KBD pode mandar scancodes enquanto o nosso codigo estiver escrevendo comandos para o KBC
+	- Como prevenir aceitar um scancode como resposta a um comando? 
+	- É mais facil resolver isto para comandos KBC do que para comandos KBD
+	- Assumir que todos os scancodes bytes gerados pelo KBD são diferentes das respostas KBD
