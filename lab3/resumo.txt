@@ -1,3 +1,35 @@
+Cap3
+- Quando o usuario pressiona ou larga uma das suas teclas, o teclado manda um scancode para o KBC (Keyboard controller). Este põe
+o codigo num registo, e gera uma interrupção, se está configurado para o fazer. É agora o trablho do IH ler o scancode do KBC.
+- Apesar de o KBC é raramente utilizado em modo "poll", iremos ler os scan usando esta tecnica neste lab
+
+3.1 Scancode
+- Um scancode apenas depende apenas da posição da tecla no teclado e é diferente do codigo de ASCII da tecla correspondente.
+- A conversao entre os scancodes e os caracteres que representam é habitualmente feita pelo sistema operativo usando um "keymap"
+- Iremos usar o Portugues keymap
+- O scancode gerado quando uma tecla é premida (Make code) é diferente do scancode da mesma tecla quando é largada (break code)
+- Diferem no bit mais significativo (o Break code tem o MSB a 1)
+- Usar diferentes break e make code dá bastante flexibilidade
+- Maior parte dos scancodes são de um byte. Os de dois, têm o primeiro byte igual a: 0xE0. Existem scancodes maiores, mas nao serao usados
+- Este conjunto de scancodes descritos são conhecidos como set 1. Existe outro set( o set 2), mas o Minix3  configura o KBC para 
+converter os scancodes do set2 para os de set1
+
+3.2 The i8042: The keyboard controller (KBC)
+- A comunicação feita entre o teclado e o processador é feita pelo KBC
+
+4. Minix 3 Notes
+4.1 Disabling the Default Interrupt Handler
+- A IRQ do teclado é a IRQ1
+
+4.2 Measuring Time
+- Tanto o teclado como o KBC podem demorar algum tempo a responder ao comando. Por exemplo a especificacao da IBM para o i8024 requer 
+que o teclado responda a um comando em 20ms. Logo o codigo nao deve esperar uma resposta imediata logo depois de imitir um comando
+- Uma abordagem simples é a do codigo esperar indefinitivamente, ou até o KBC reportar um time-out. Uma aborgadem mais tolerante de erro
+é a do codigo dar tempo suficiente para o KBC ou o teclado responder, repetir mais umas vezes, e desistir.
+- Para medir os intervalos de tempo, deve se usar a função tickdelay(). Esta função bloqueia o processo que a executa pelo
+intervalo de tempo especificado no parametro de entrada. 
+
+
 Cap5
 - Fazer o codigo modular, ou seja,, fazer varias funções
 - Todos os codigos fonte (.c) devem incluir a linha: #include <lcom/lcf.h>. Deve ser a primeira header a ser incluida
