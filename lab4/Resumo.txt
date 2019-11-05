@@ -1,0 +1,175 @@
+2. What to Do
+
+- Tem que se implementar as seguintes funcionalidades:
+	- Lê e faz display dos pacotes mandados pelo PS/2 do rato
+	- Trata das interrupções do rato e do timer
+	- Usa o PS/2 em modo remoto(remote mode)
+	- Reconhece um "gesto de rato" usando uma state machine
+
+1.	int mouse_test_packet()
+2.	int mouse_test_async()
+3.	int mouse_test_remote()
+4.	int mouse_test_gesture()
+
+3. The PS/2 Mouse and the i8042
+
+- O rato PS/2 tem 3 botões e é capaz de registar o movimento do rato num plano
+- Normalmente está configurado para reportar o seu estado(o estado dos botões ou a posição no plano) para o seu controlador
+num "event-driven fashion", ou seja, quando o seu estado muda. Faz isto mandando um pacote multi-byte para o seu controlador, 
+que põe todos os bytes recebidos num registo, e se estiver configurado para tal, ira mandar uma interrupção. No PC, o controlador
+do rato está associados à linha 12 da IRQ. Depois, o interruption handler lê os bytes do pacote, um por interrupção, do controlador
+
+3.1 Mouse Packets
+- Os pacotes mandados pelo rato para o controlador são compostos por vários bytes. Diferentes tipos de rato usam diferentes tipos de pacote
+Por exemplo, enquanto o rato PS/2 usa pacotes de 3-bytes, o Microsoft Intellimouse, que inclui uma "rodinha", usa pacotes de 4-bytes
+
+3.2 The i8042: The keyboard (and mouse) controller (KBC)
+- A comunicacao feita entre o rato e processador é mediada pelo KBC.
+- Neste lab apenas precisamos de usar o i8042, que permite fazer alguns comandos com o mouse (ver lab anterior). Os KBC-commands
+sao escritos no porto 0x64. Permite o device driver mandar comandos diretamente para o rato, usando KBC-command 0xD4,
+Write (byte) para o dispositivo auxiliar
+- Os comandos para o rato, e os seus argumentos(se existirem) sao argumentos do comando-KBC 0xD4. Isto é, para mandar um comando para o rato
+o driver tem que escrever primeiro o comando 0xD4 para o KBC, usado o port 0x64, e depois o comando para o port 0x60. 
+O rato manda uma mensagem que indica se o comando foi recebido com sucesso ou não. O KBC põe a resposta no OUTPUT_BUF(0x60)
+Se o comando tem argumentos, para cada byte de argumentos, o driver tem que escrever o comando 0xD4 no porto 0x64,
+e depois o byte para o port 0x60. Para cada argumento, o kbc manda uma mensagem de sucesso/insucesso para o OUTPUT_BUF
+Finalmente, depois de receber tudo, o rato executa o comando, e se for preciso, manda uma resposta para o OUT_BUF
+
+3.3 Synchronization Issues
+- O device driver tem que estar sincronizado com o rato para garantir que ao processar um pacote, os 3-bytes que usa 
+pertenção todos ao mesmo pacote(pode ler 2 de um pacote e o outro byte de outro)
+- Se o driver estiver desincronizado, tem que ser sincronizado outra vez
+- - Porem, os bytes do pacote PS/2 nao contem uma identificacao. Tem que se verificar se o 3-bit do primeiro byte tem que ser 1
+
+PowerPoints:
+- O rato tem dois "9-bit 2’s complement" contadores para registar o movimento do rato no plano. 
+Estes medem o movimento relativo, ou seja, fazem reset sempre que o mouse reporta o seu valor.
+Se nalgum destes contadores ocorrer overflow, o controlador ativa a flag de overflow
+
+4.1 Minix's Initial Mouse Configuration
+-Ou nós ou o LCF tem que fazer isto:
+	- enable data reporting, para o rato mandar os pacotes
+	- setting reporto mode, para o rato mandar pacotes apenas quando pedimos
+	- mouse interrupts subscription, para prevenir o IH do minix de "roubar" os pacotes (IRQ_REENABLE e o IRQ_EXCLUSIVE)
+
+4.2 Waiting for the Mouse to Respond
+- Tal como o keyboard, tem que se dar tempo suficiente para o KBC ou o rato para responder, tentar algumas vezes, e finalmente desistir
+
+5.1 LCF Requirements
+- Same crap, tem que incluir nos C source files a header #include <lcom/lcf.h> e as 4 funcoes principais têm que estar entre parenteses
+
+5.2 int mouse_test_packet(uint32_t cnt)
+-O que fazer:
+	- Configurar o rato
+	- Receber o numero de pacotes especificados no argumento via interrupções
+	- separa los (parse them)
+	- imprimi los
+- As interrupções do rato devem estar ligadas em IRQ_EXCLUSIVE, e a data reporting deve estar ligada.
+- O prof dá nos uma funcao: int mouse_enable_data_reporting(), que faz enable à data reporting em stream mode.
+Pode se usar esta funcao no inicio, mas na versao final, temos que fazer a nossa versão da funcao
+- O IH lê um byte por interrupção. Usar a void mouse_ih(); A passagem de dados deve ser feita com 
+variaveis globais, de preferencia as static!!! A definicao tem que aparecer entre parenteses
+- Sempre que um pacote é recebido(depois de receber o 3º byte), o programa tem que separa lo e imprimi lo na consola
+chamando a funcao void mouse_print_packet(struct packet *pp);
+- Antes de chamar esta funcao, o o programa deve inicializar a struct packet
+- No fim, nao esquecer de fazer disbale da data reporting e fazer desubscrever as interrupções do rato
+
+PowerPoint: Como mandar comando para o rato
+- Os comandos sao escritos para o porto 0x64 (ver tabela de comandos no powerpoint)
+- 3.2 explica como mandar argumentos, se existirem
+- O bit 5 do status register indica se os dados do OUT_BUF estao vindo do rato ou nao
+- Nao escrever no IN_BUF se o IBF esta a 1!
+- Ver os Mouse commands na tabela do powerpoint
+- Em resposta aos comandos e argumentos recebidos, o controlador do rato manda um byte de reconhecimento:
+	- ACK (0xFA) se correu tudo bem
+	- NACK (0xFE) se for um byte invalido
+	- ERROR (0xFC) se for um segundo consecutivo byte invalido
+- Este byte de reconhecimento deve ser lido do OUT_BUF(0x60)
+- NOTA IMPORTANTE: Quando se recebe uma resposta NACK, deve se tentar mandar o comando outra vez. Se um argumento elicita uma resposta NACK,
+deve se retransmitir o comando inteiro, nao apenas o argumento
+-NOTA: o byte-reconhecimento nao é a resposta ao comando. Se existir resposta, o controlador ira manda la depois do byte-reconhecimento
+do ultimo byte-argumento
+
+5.3 mouse_test_remote(uint16_t period, uint8_t cnt)
+- Esta funcao deve configurar o rato para operar em remote mode e periodicamente pedir o pacote de dados do rato.
+O periodo a ser usado está especificado em milisegundos no primeiro argumento. A leitura dos pacotes de dados do rato deve ser feita
+fazendo o polling do status register. Tal como a funcao anterior, esta deve montar, separar e imprimir o data package.
+Deve parar depois de receber um numero cnt de pacotes
+- O LCF configura o rato para operar em remote mode e desativa as interrupções do rato
+- No fim, tem que por o mouse em stream mode com a data reporting desativada. Para além disto, deve fazer reset do KBC command byte
+para o valor default, usando a funcao uint8_t minix_get_dflt_kbc_cmd_byte();
+
+PowerPoint:
+- Os data package devem ser lidos, usando o comando Read Data(0xEB) e "mostrados" peridicamente
+- Apenas deve se mandar um comando por pacote, usar o tickdelay() para medir o tempo, e ver o status register para ler os bytes
+
+5.4 mouse_test_async(uint8_t idle_time)
+- igual a mouse_test_packet(), so que acaba quando nao recebe pacotes por um periodo de tempo definido pelo idle_timer
+- nao deve mudar a configuracao do timer. deve ler a frequencia pela funcao sys_hz()
+
+State machine-PowerPoint:
+- Um evento é uma mudança de estado
+- Virtualmente, toda a processao de I/O (interruption e/ou polling) "is driven by events". O nosso projeto tambem será event-driven
+- Event drivem design: é um design onde o flow control é determinado pelo "ambiente" em vez de pelo program em si. Essencialmente,
+o codigo é executado reactivamente em resposta a eventos que podem ocorrer assincronamente com a execucao do programa
+- Comum em Graphical user interfaces (GUI), Jogos, sistemas embebidos, Communications/network software
+- Event Queues: fornecem o "necessary buffering" para que se possa tratar um evento assincronamente
+- Event Handlers: processam os tipos de evento
+- Dispatchers: monitorizam as event queues e chamas os event handlers apropriados. Pode ser implementado como um loop que procura eventos
+- É muito útil usar uma combinação de state machines com um event-driven design
+
+- Mealy Machine: uma state machine que depende do estado em que se encontra e do input event (DFA)
+- Moore Machine: uma state machine onde o output só depende do estado
+- Num event-driven design, é melhor utilizar a Mealy Machine. Para cada estado, quando o evento relevante ocorre, é apenas necessario
+produzir um output e mudar o estado. O evento relevante pode nao ser o evento cru gerado pelo dispositivo de input. Eventos "crus" gerados
+pelo rato são as rececções de pacotes de bytes, nao a mudança de estado dos botoes do rato.
+
+- Os dispositivos I/O sao processados pelos correspondentes IH.
+Os IH podem ser:
+	- Aplication Dependent: Por exemplo , o IH do rato recebe os pacotes do rato e deteta a sequencia de saida
+	- Aplication Independent: o IH do rato apenas recebe os pacotes. A sequencia de saida é detetada por codigo Aplication Dependent.
+	
+Application Independent vs Application Dependent IH
+- Em geral:
+	- Podem ser reutilizadas. Sistemas operativos IH sao independentes de aplicacoes
+	- Introduz um nivel de "indirection". 
+		- Pode adicionar flexibilidade
+		- Pode ser mais responsivo ( os IH sao mais pequenos)
+		- Requer mais codigo
+		- Tem uma maior "overhead"
+-No Minix3, a aplicacao dependente tem que ser feita no mesmo loop da aplicacao independente
+
+5: while( 1 ) { /* You may want to use a different condition */
+6: /* Get a request message. */
+7: if ( driver_receive(ANY, &msg, &ipc_status) != 0 ) {
+8: printf("driver_receive failed with: %d", r);
+9: continue;
+10: }
+11: if (is_ipc_notify(ipc_status)) { /* received notification 12: switch (_ENDPOINT_P(msg.m_source)) {
+13: case HARDWARE: /* hardware interrupt notification */
+14: if (msg.NOTIFY_ARG & irq_set) { /* subscribed interrupt 15: ... /* process it */
+16: }
+17: ...
+18: }
+19: } else { /* received a standard message, not a notificatio
+20: ...
+21: }
+
+22: /* Now, do application dependent event handling */
+23: if ( event & MOUSE_EVT ) {
+24: handle_mouse();
+25: } else if ( event &
+
+5.5 mouse_test_gesture(uint8_t x_len, uint8_t tolerance)
+- Deve fazer o mesmo da mouse_test_packet(), no sentido que deve imprimir os pacotes que recebe. A diferença é que deve terminar quando 
+o utilizador desenhar um E logico (o V invertido). A primeira linha deve ser desenhada quando apenas o o botao esquerdo está premido,
+enquanto a segunda linha tem que ser desenhada enquanto o botao direito está premido.
+Requerimentos:
+1. O inicio da linha é sinalizado ao premir o botao esquerdo, quando todos os outros nao estão premidos
+2. Cada linha tem que ser desenhada na direção "correta". Para tolerar ratos menos precisos, utiliza-se o segundo parametro, tolerance.
+Por exemplo, como a primeira linha é para cima, todos os movimentos do rato devem ter, em principio, deslocações positivas 
+no eixo dos X e dos Y. Mas o algoritmo deve permitir pequenas deslocacoes negativas, ou seja, o seu valor absoluto tem que ser < tolerance
+3. O fim da linha é marcado pela libertação do botao
+4. O botao esquerdo deve ser libertado antes de o botao direito ser premido. Nenhum outros eventos sao permitidos.
+5. Qualquer movimento feito entre o libertar e premir os butoes deve ser residual, ou seja, os deslocamentos X e Y têm que ser <tolerance
+6. Para simplificar, cada pacote do rato pode levar ao maximo a um evento relevante à gesture machine (DFA)
