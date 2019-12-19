@@ -1,0 +1,61 @@
+Exportar repositorio para RedMine:
+svn import --username up201706860 proj https://svn.fe.up.pt/repos/lcom1920-t5g02/proj  -m "Imported proj/"
+
+Criar uma Working Copy:
+svn checkout --username up201706860 https://svn.fe.up.pt/repos/lcom1920-t5g02/proj ./proj --force 
+
+Apagar ficheiro da WC:
+svn delete hello
+
+Reverter acao:
+svn revert hello
+
+Fazer commit para o repositorio:
+svn commit -m "Udpate: Função timer_get_conf corrigida" 
+
+Atual WC:
+pwd
+
+fazer update:
+
+svn update
+
+Ver status:
+svn status
+
+Ver historico:
+svn log
+
+Apagar WC:
+rm -r lab0
+
+Listar:
+ls -la
+
+Sair: 
+poweroff
+
+Compilar:
+minix$ make
+
+Limpar executavel:
+minix$ make clean
+
+Update do .d file:
+minix$ make depend
+
+Para LCOM, para compilar, é recomendado:
+minix$ make clean
+minix$ make
+
+Run the Project:
+minix$ lcom_run lab2
+
+Parar o Run:
+minix$ lcom_stop lab2
+
+Fazer add aos ficheiros:
+svn add <nome_de_ficheiro>
+
+
+
